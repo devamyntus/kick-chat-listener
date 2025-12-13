@@ -13,6 +13,17 @@ const DB_CONFIG = {
   database: process.env.DB_NAME
 };
 
+// Track users who messaged in last 5 minutes
+const activeUsers = new Map(); // username → timestamp (ms)
+
+// Clean old entries every 30 seconds
+setInterval(() => {
+  const cutoff = Date.now() - 300000; // 5 minutes
+  for (const [user, time] of activeUsers.entries()) {
+    if (time < cutoff) activeUsers.delete(user);
+  }
+}, 30000);
+
 let isStreamActive = true; // Set to false if you want to add stop functionality later
 
 const userLastMessage = new Map(); // In-memory cooldown tracker (username → timestamp)
