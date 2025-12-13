@@ -28,11 +28,11 @@ async function awardCredit(username) {
     const conn = await mysql.createConnection(DB_CONFIG);
 
     // This single query: 
-    // - Creates user if not exists (with live_credits = 1)
-    // - Or adds +1 if they exist
+    // - Creates user if not exists (with live_credits = 1 and last_message_time = NOW())
+    // - Or adds +1 if they exist + updates last_message_time
     await conn.execute(`
-      INSERT INTO users (username, live_credits, created_at, date_joined)
-      VALUES (?, 1, NOW(), NOW())
+      INSERT INTO users (username, live_credits, created_at, date_joined, last_message_time)
+      VALUES (?, 1, NOW(), NOW(), NOW())
       ON DUPLICATE KEY UPDATE
         live_credits = live_credits + 1,
         last_message_time = NOW()
