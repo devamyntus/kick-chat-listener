@@ -16,24 +16,33 @@ let isStreamActive = false;
 const userLastMessage = new Map();
 
 async function awardCredit(username) {
-  if (!isStreamActive) return;
+  username = username.toLowerCase(); // Always store lowercase
 
   const now = Date.now();
   const last = userLastMessage.get(username) || 0;
-  if (now - last < 60000) return; // 60 seconds cooldown
+  if (now - last < 60000) return; // 60-second cooldown
 
   userLastMessage.set(username, now);
 
   try {
     const conn = await mysql.createConnection(DB_CONFIG);
-    await conn.execute(
-      'UPDATE users SET live_credits = live_credits + 1 WHERE username = ?',
-      [username.toLowerCase()]
-    );
-    // If user doesn't exist yet, you might want to add an INSERT here later
+
+    // This single query: 
+    // - Creates user if not exists (with live_credits = 1)
+    // - Or adds +1 if they exist
+    await conn.execute(`
+      INSERT INTO users (username, live_credits, created_at, date_joined)
+      VALUES (?, 1, NOW(), NOW())
+      ON DUPLICATE KEY UPDATE
+        live_credits = live_credits + 1,
+        last_message_time = NOW()
+    `, [username]);
+
+    console.log(`+1 live credit → ${username}`); // Optional: see it working in logs
+
     await conn.end();
   } catch (err) {
-    console.error('Database error:', err);
+    console.error('DB Award Error:', err.message);
   }
 }
 
