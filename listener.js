@@ -12,7 +12,7 @@ const DB_CONFIG = {
   database: process.env.DB_NAME
 };
 
-let isStreamActive = false;
+let isStreamActive = true; // Always on for testing
 const userLastMessage = new Map();
 
 async function awardCredit(username) {
