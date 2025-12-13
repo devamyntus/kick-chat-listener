@@ -8,6 +8,7 @@
   "dependencies": {
     "express": "^4.18.2",
     "ws": "^8.14.2",
-    "mysql2": "^3.6.5"
+    "mysql2": "^3.6.5",
+    "cors": "^2.8.5"   // ← ADD THIS EXACT LINE
   }
 }
