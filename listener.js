@@ -31,11 +31,11 @@ async function awardCredit(username) {
     // - Creates user if not exists (with live_credits = 1 and last_message_time = NOW())
     // - Or adds +1 if they exist + updates last_message_time
     await conn.execute(`
-      INSERT INTO users (username, live_credits, created_at, date_joined, last_message_time)
-      VALUES (?, 1, NOW(), NOW(), NOW())
-      ON DUPLICATE KEY UPDATE
-        live_credits = live_credits + 1,
-        last_message_time = NOW()
+INSERT INTO users (username, live_credits, created_at, date_joined, last_message_time)
+VALUES (?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  live_credits = live_credits + 1,
+  last_message_time = CURRENT_TIMESTAMP
     `, [username]);
 
     console.log(`+1 live credit → ${username}`); // Optional: see it working in logs
