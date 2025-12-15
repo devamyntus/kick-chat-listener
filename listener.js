@@ -3,9 +3,7 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
 
-// === CONFIGURATION ===
-const CHANNEL_ID = '484768632223'; // Booth's Kick channel ID
-
+const CHANNEL_ID = '484768632223';
 const DB_CONFIG = {
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -13,12 +11,10 @@ const DB_CONFIG = {
   database: process.env.DB_NAME
 };
 
-// Track users who messaged in last 5 minutes (for coin drops)
-const activeUsers = new Map(); // username (lowercase) → timestamp (ms)
+const activeUsers = new Map();
 
-// Clean up old entries every 30 seconds
 setInterval(() => {
-  const cutoff = Date.now() - 300000; // 5 minutes ago
+  const cutoff = Date.now() - 300000;
   for (const [user, time] of activeUsers.entries()) {
     if (time < cutoff) {
       activeUsers.delete(user);
@@ -27,17 +23,14 @@ setInterval(() => {
 }, 30000);
 
 let isStreamActive = true;
-const userLastMessage = new Map(); // cooldown for live credits
+const userLastMessage = new Map();
 
-// Award +1 live credit (60-second cooldown)
 async function awardCredit(username) {
   username = username.toLowerCase();
   const now = Date.now();
   const last = userLastMessage.get(username) || 0;
-  if (now - last < 60000) return; // 60 sec cooldown
-
+  if (now - last < 60000) return;
   userLastMessage.set(username, now);
-
   try {
     const conn = await mysql.createConnection(DB_CONFIG);
     await conn.execute(`
@@ -54,10 +47,8 @@ async function awardCredit(username) {
   }
 }
 
-// WebSocket connection to Kick chat
 function connectWS() {
   const ws = new WebSocket('wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0-rc2&flash=false');
-
   ws.on('open', () => {
     console.log('Connected to Kick chat!');
     ws.send(JSON.stringify({
@@ -65,7 +56,6 @@ function connectWS() {
       data: { channel: `chatrooms.${CHANNEL_ID}.v2` }
     }));
   });
-
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data);
@@ -74,36 +64,26 @@ function connectWS() {
         const username = payload.sender?.username || payload.chatData?.sender?.username;
         if (username) {
           const lower = username.toLowerCase();
-
-          // Track for coin drop (active in last 5 min)
           activeUsers.set(lower, Date.now());
-
-          // Award live credit
           awardCredit(lower);
         }
       }
     } catch (e) {
-      // Ignore malformed messages
     }
   });
-
   ws.on('close', () => {
     console.log('Disconnected – reconnecting in 5 seconds...');
     setTimeout(connectWS, 5000);
   });
-
   ws.on('error', (err) => {
     console.error('WebSocket Error:', err);
   });
 }
-
 connectWS();
 
-// === Express Server ===
 const app = express();
 app.use(express.json());
 
-// CORS for your admin site
 app.use(cors({
   origin: [
     'https://darkgrey-echidna-627099.hostingersite.com',
@@ -114,25 +94,21 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'x-api-key']
 }));
 
-// Log requests
 app.use((req, res, next) => {
   console.log(`Incoming ${req.method} ${req.path} from ${req.get('origin') || 'direct'}`);
   next();
 });
 
-// Health check
 app.get('/health', (req, res) => {
   res.send('OK');
 });
 
 const API_KEY = process.env.ADMIN_API_KEY || 'change-me-now';
 
-// Clear all live credits
 app.post('/start-stream', async (req, res) => {
   if (req.headers['x-api-key'] !== API_KEY) {
     return res.status(401).send('Wrong key');
   }
-
   try {
     const conn = await mysql.createConnection(DB_CONFIG);
     await conn.execute('UPDATE users SET live_credits = 0');
@@ -145,7 +121,6 @@ app.post('/start-stream', async (req, res) => {
   }
 });
 
-// Optional stop stream
 app.post('/stop-stream', (req, res) => {
   if (req.headers['x-api-key'] !== API_KEY) {
     return res.status(401).send('Wrong key');
@@ -154,25 +129,20 @@ app.post('/stop-stream', (req, res) => {
   res.send('Stream stopped');
 });
 
-// Drop coins to everyone active in last 5 minutes
 app.post('/drop-coins', async (req, res) => {
   if (req.headers['x-api-key'] !== API_KEY) {
     return res.status(401).send('Wrong key');
   }
-
   const amount = parseInt(req.body.amount);
   if (!amount || amount <= 0) {
     return res.status(400).send('Invalid amount');
   }
-
   const users = Array.from(activeUsers.keys());
   if (users.length === 0) {
     return res.send('No users active in the last 5 minutes.');
   }
-
   try {
     const conn = await mysql.createConnection(DB_CONFIG);
-
     for (const user of users) {
       await conn.execute(`
         INSERT INTO users (username, current_coins, total_coins)
@@ -182,7 +152,6 @@ app.post('/drop-coins', async (req, res) => {
           total_coins = total_coins + VALUES(total_coins)
       `, [user, amount, amount]);
     }
-
     await conn.end();
     console.log(`Coin drop: ${amount} coins to ${users.length} active users`);
     res.send(`Dropped ${amount} coins to ${users.length} active user(s)!`);
