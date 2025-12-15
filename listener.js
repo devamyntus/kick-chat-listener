@@ -3,7 +3,7 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 
 // === CHANGE THIS ===
-const CHANNEL_ID = '4847686'; // ← Replace with Booth's real Kick channel ID
+const CHANNEL_ID = '121684'; // ← Replace with Booth's real Kick channel ID
 
 const DB_CONFIG = {
   host: process.env.DB_HOST,
