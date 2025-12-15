@@ -3,7 +3,7 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 
 // === CHANGE THESE ===
-const CHANNEL_ID = '4847686'; // Booth's Kick channel ID - change if different
+const CHANNEL_ID = '121684'; // Booth's Kick channel ID - change if different
 
 const DB_CONFIG = {
   host: process.env.DB_HOST,
