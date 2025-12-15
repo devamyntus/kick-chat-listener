@@ -2,39 +2,48 @@ const WebSocket = require('ws');
 const express = require('express');
 const mysql = require('mysql2/promise');
 
-// === CHANGE THESE ===
-const CHANNEL_ID = '121684'; // Booth's Kick channel ID - change if different
+// === CHANGE THIS ===
+const CHANNEL_ID = '4847686'; // ← Replace with Booth's real Kick channel ID
 
 const DB_CONFIG = {
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME
+  database: process.env.DB_NAME,
+  port: 3306  // Required for Hostinger
 };
 
-let isStreamActive = false;
-const userLastMessage = new Map();
+// Always active — credits awarded on every valid message
+const userLastMessage = new Map(); // username → last timestamp
 
 async function awardCredit(username) {
-  if (!isStreamActive) return;
+  username = username.toLowerCase();
 
   const now = Date.now();
   const last = userLastMessage.get(username) || 0;
-  if (now - last < 60000) return; // 60 seconds cooldown
+
+  // 60-second cooldown: only award 1 credit per minute per user
+  if (now - last < 60000) return;
 
   userLastMessage.set(username, now);
 
   try {
     const conn = await mysql.createConnection(DB_CONFIG);
-    await conn.execute(
-      'UPDATE users SET live_credits = live_credits + 1 WHERE username = ?',
-      [username.toLowerCase()]
-    );
-    // If user doesn't exist yet, you might want to add an INSERT here later
+
+    // This creates the user if new, or adds +1 credit if they exist
+    await conn.execute(`
+      INSERT INTO users (username, live_credits, last_message_time)
+      VALUES (?, 1, CURRENT_TIMESTAMP)
+      ON DUPLICATE KEY UPDATE
+        live_credits = live_credits + 1,
+        last_message_time = CURRENT_TIMESTAMP
+    `, [username]);
+
+    console.log(`+1 live credit → ${username}`);
     await conn.end();
-  } catch (err) {
-    console.error('Database error:', err);
-  }
+} catch (err) {
+  console.error('DB Award Error:', err);
+}
 }
 
 function connectWS() {
@@ -51,52 +60,47 @@ function connectWS() {
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data);
-      if (msg.event && msg.event.includes('ChatMessage')) {
-        const payload = JSON.parse(msg.data);
-        const username = payload.sender?.username || payload.chatData?.sender?.username;
-        if (username) {
-          awardCredit(username.toLowerCase());
+
+      // Handles current Kick event + fallback for older ones
+      if (msg.event === 'App\\Events\\ChatMessageSentEvent' || msg.event.includes('ChatMessage')) {
+        try {
+          const payload = JSON.parse(msg.data);
+          const username = payload.sender?.username ||
+                           payload.message?.sender?.username ||
+                           payload.chatData?.sender?.username;
+
+          if (username) {
+            console.log(`Message from: ${username}`); // Remove this line later if too spammy
+            awardCredit(username);
+          }
+        } catch (e) {
+          // Ignore malformed payload
         }
       }
     } catch (e) {
-      // Ignore bad messages
+      // Ignore malformed message
     }
   });
 
   ws.on('close', () => {
-    console.log('Disconnected – reconnecting...');
+    console.log('Disconnected – reconnecting in 5 seconds...');
     setTimeout(connectWS, 5000);
+  });
+
+  ws.on('error', (err) => {
+    console.error('WebSocket Error:', err);
   });
 }
 
 connectWS();
 
-// Web server for health check and buttons
+// Minimal server: only for health check (keeps Render awake)
 const app = express();
 app.use(express.json());
 
 app.get('/health', (req, res) => res.send('OK'));
 
-const API_KEY = process.env.ADMIN_API_KEY || 'change-me-now';
-
-app.post('/start-stream', (req, res) => {
-  if (req.headers['x-api-key'] !== API_KEY) return res.status(401).send('Wrong key');
-  
-  isStreamActive = true;
-  
-  mysql.createConnection(DB_CONFIG).then(conn => {
-    conn.execute('UPDATE users SET live_credits = 0');
-    conn.end();
-    res.send('Stream started – all live credits cleared!');
-  }).catch(err => res.status(500).send('DB error'));
-});
-
-app.post('/stop-stream', (req, res) => {
-  if (req.headers['x-api-key'] !== API_KEY) return res.status(401).send('Wrong key');
-  
-  isStreamActive = false;
-  res.send('Stream stopped');
-});
-
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Health server running on port ${PORT}`);
+});
