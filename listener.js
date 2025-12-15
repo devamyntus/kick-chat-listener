@@ -4,7 +4,7 @@ const mysql = require('mysql2/promise');
 const cors = require('cors');
 
 // === CONFIGURATION ===
-const CHANNEL_ID = '4847686'; // Booth's Kick channel ID
+const CHANNEL_ID = '484768632223'; // Booth's Kick channel ID
 
 const DB_CONFIG = {
   host: process.env.DB_HOST,
