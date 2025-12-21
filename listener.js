@@ -65,14 +65,22 @@ function connectWS() {
       if (msg.event === 'App\\Events\\ChatMessageSentEvent' || msg.event.includes('ChatMessage')) {
         try {
           const payload = JSON.parse(msg.data);
-          const username = payload.sender?.username ||
-                           payload.message?.sender?.username ||
-                           payload.chatData?.sender?.username;
+const username = payload.sender?.username ||
+                 payload.message?.sender?.username ||
+                 payload.chatData?.sender?.username;
 
-          if (username) {
-            console.log(`Message from: ${username}`); // Remove this line later if too spammy
-            awardCredit(username);
-          }
+if (username) {
+  const lowerUsername = username.toLowerCase();
+
+  // Exclude these usernames (case-insensitive)
+  if (lowerUsername === 'botrix' || lowerUsername === 'booth') {
+    console.log(`Ignored message from excluded user: ${username}`);
+    // Do nothing — no credits awarded
+  } else {
+    console.log(`Message from: ${username}`);
+    awardCredit(username);
+  }
+}
         } catch (e) {
           // Ignore malformed payload
         }
