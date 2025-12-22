@@ -2,19 +2,17 @@ const WebSocket = require('ws');
 const express = require('express');
 const mysql = require('mysql2/promise');
 
-// === CHANGE THIS ===
-const CHANNEL_ID = '121684'; // ← Replace with Booth's real Kick channel ID
+const CHANNEL_ID = '121684';
 
 const DB_CONFIG = {
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  port: 3306  // Required for Hostinger
+  port: 3306 
 };
 
-// Always active — credits awarded on every valid message
-const userLastMessage = new Map(); // username → last timestamp
+const userLastMessage = new Map();
 
 async function awardCredit(username) {
   username = username.toLowerCase();
@@ -22,7 +20,6 @@ async function awardCredit(username) {
   const now = Date.now();
   const last = userLastMessage.get(username) || 0;
 
-  // 60-second cooldown: only award 1 credit per minute per user
   if (now - last < 60000) return;
 
   userLastMessage.set(username, now);
@@ -30,7 +27,6 @@ async function awardCredit(username) {
   try {
     const conn = await mysql.createConnection(DB_CONFIG);
 
-    // This creates the user if new, or adds +1 credit if they exist
     await conn.execute(`
       INSERT INTO users (username, live_credits, last_message_time)
       VALUES (?, 1, CURRENT_TIMESTAMP)
@@ -61,7 +57,6 @@ function connectWS() {
     try {
       const msg = JSON.parse(data);
 
-      // Handles current Kick event + fallback for older ones
       if (msg.event === 'App\\Events\\ChatMessageSentEvent' || msg.event.includes('ChatMessage')) {
         try {
           const payload = JSON.parse(msg.data);
@@ -72,21 +67,17 @@ const username = payload.sender?.username ||
 if (username) {
   const lowerUsername = username.toLowerCase();
 
-  // Exclude these usernames (case-insensitive)
   if (lowerUsername === 'botrix' || lowerUsername === 'booth') {
     console.log(`Ignored message from excluded user: ${username}`);
-    // Do nothing — no credits awarded
   } else {
     console.log(`Message from: ${username}`);
     awardCredit(username);
   }
 }
         } catch (e) {
-          // Ignore malformed payload
         }
       }
     } catch (e) {
-      // Ignore malformed message
     }
   });
 
@@ -102,7 +93,6 @@ if (username) {
 
 connectWS();
 
-// Minimal server: only for health check (keeps Render awake)
 const app = express();
 app.use(express.json());
 
