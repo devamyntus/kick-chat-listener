@@ -12,13 +12,16 @@ const DB_CONFIG = {
   port: 3306
 };
 
-// In-memory tracking: username (lowercase) → array of minute timestamps (as numbers)
+// In-memory tracking: username (lowercase) → array of minute timestamps
 const userMinuteActivity = new Map();
 
-// Track when a user was last awarded (to prevent double-award in same completion minute)
+// Track last awarded minute to prevent double awards
 const userLastAwardMinute = new Map();
 
-// List of bots to ignore (case-insensitive)
+// Track previous streak length for detecting losses (for logging)
+const userPreviousStreak = new Map();
+
+// Bots to ignore
 const IGNORED_BOTS = new Set(['botrix']);
 
 async function award10Points(username) {
@@ -33,7 +36,7 @@ async function award10Points(username) {
         points = points + 10
     `, [lowerUsername]);
 
-    console.log(`+10 points awarded (10-minute streak completed) → ${username}`);
+    console.log(`Message from: ${username} (Streak: 10 → +10 points awarded!)`);
     await conn.end();
   } catch (err) {
     console.error('Database error during award:', err);
@@ -44,55 +47,79 @@ function processChatMessage(username) {
   const originalUsername = username;
   username = username.toLowerCase();
 
-  // Ignore known bots
+  // Ignore bots
   if (IGNORED_BOTS.has(username)) {
     return;
   }
 
   const now = Date.now();
-  const currentMinute = Math.floor(now / 60000); // Minute bucket
+  const currentMinute = Math.floor(now / 60000);
 
-  // Get or initialize user's minute history
   let minutes = userMinuteActivity.get(username) || [];
 
-  // Only add the minute if it's new (prevents spam in same minute from helping)
-  if (minutes.length === 0 || minutes[minutes.length - 1] !== currentMinute) {
+  // Determine if this is a new minute for this user
+  const wasNewMinute = minutes.length === 0 || minutes[minutes.length - 1] !== currentMinute;
+
+  // Only add if it's a new minute
+  if (wasNewMinute) {
     minutes.push(currentMinute);
   }
 
-  // Clean up old minutes: keep only last 20 minutes worth (safety buffer)
+  // Clean old minutes (keep last 20 as buffer)
   const cutoff = currentMinute - 20;
   minutes = minutes.filter(m => m > cutoff);
-
-  // Update map
   userMinuteActivity.set(username, minutes);
 
-  // Sort descending: latest minute first
+  // Sort descending for streak checking
   const sortedMinutes = [...minutes].sort((a, b) => b - a);
 
-  // Check for 10 consecutive minutes ending with currentMinute
-  let streakLength = 0;
+  // Calculate current streak (consecutive minutes ending now)
+  let currentStreak = 0;
   for (let i = 0; i < sortedMinutes.length; i++) {
     if (sortedMinutes[i] === currentMinute - i) {
-      streakLength++;
+      currentStreak++;
     } else {
-      break; // Gap found → streak ends
+      break;
     }
   }
 
-  // If streak reaches exactly 10 (or more, but we only care about hitting 10)
-  if (streakLength >= 10) {
-    const lastAward = userLastAwardMinute.get(username) || 0;
+  // Get previous streak for this user (before this message)
+  const previousStreak = userPreviousStreak.get(username) || 0;
 
-    // Only award once per completed streak (when the 10th minute is filled)
+  // Log based on what happened
+  if (!wasNewMinute) {
+    // Same minute as last message → no streak change
+    console.log(`Message from: ${originalUsername} (Streak: ${currentStreak})`);
+  } else if (currentMinute - (sortedMinutes[1] || currentMinute) > 1) {
+    // There was a gap: previous minute not present → streak reset
+    if (previousStreak > 0) {
+      console.log(`Message from: ${originalUsername} (Lost streak of ${previousStreak} → now 1)`);
+    } else {
+      console.log(`Message from: ${originalUsername} (Streak: 1)`);
+    }
+  } else if (currentStreak > previousStreak) {
+    // Streak increased
+    console.log(`Message from: ${originalUsername} (Streak: ${currentStreak})`);
+  } else {
+    // Shouldn't happen often, but safe
+    console.log(`Message from: ${originalUsername} (Streak: ${currentStreak})`);
+  }
+
+  // Update previous streak for next comparison
+  userPreviousStreak.set(username, currentStreak);
+
+  // Award points if streak hits 10+
+  if (currentStreak >= 10) {
+    const lastAward = userLastAwardMinute.get(username) || 0;
     if (currentMinute > lastAward) {
       award10Points(originalUsername);
       userLastAwardMinute.set(username, currentMinute);
+      // Note: we override the normal streak log above with the award log in award10Points
     }
   }
 }
 
-// WebSocket connection to Kick chat
+// WebSocket connection
 function connectWS() {
   const ws = new WebSocket('wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0-rc2&flash=false');
 
@@ -108,7 +135,6 @@ function connectWS() {
     try {
       const msg = JSON.parse(data);
 
-      // Main chat message events
       if (msg.event === 'App\\Events\\ChatMessageSentEvent' || msg.event.includes('ChatMessage')) {
         let payload;
         try {
@@ -124,12 +150,14 @@ function connectWS() {
           payload.sender_username;
 
         if (username && typeof username === 'string') {
-          console.log(`Message from: ${username}`);
-          processChatMessage(username.trim());
+          const trimmed = username.trim();
+          if (trimmed) {
+            processChatMessage(trimmed);
+          }
         }
       }
     } catch (e) {
-      // Silently ignore malformed messages
+      // Ignore malformed
     }
   });
 
@@ -155,7 +183,7 @@ app.listen(PORT, () => {
   console.log(`Health server running on port ${PORT}`);
 });
 
-// Optional: Cleanup inactive users every 30 minutes to prevent memory growth
+// Cleanup inactive users every 30 minutes
 setInterval(() => {
   const nowMinute = Math.floor(Date.now() / 60000);
   let cleaned = 0;
@@ -164,6 +192,7 @@ setInterval(() => {
     if (minutes.length > 0 && nowMinute - minutes[minutes.length - 1] > 30) {
       userMinuteActivity.delete(username);
       userLastAwardMinute.delete(username);
+      userPreviousStreak.delete(username);
       cleaned++;
     }
   }
@@ -171,4 +200,4 @@ setInterval(() => {
   if (cleaned > 0) {
     console.log(`Cleanup: Removed ${cleaned} inactive users from tracking. Current active: ${userMinuteActivity.size}`);
   }
-}, 1800000); // Every 30 minutes
+}, 1800000); // 30 minutes
