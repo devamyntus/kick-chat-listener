@@ -15,14 +15,14 @@ const DB_CONFIG = {
 // In-memory tracking: username (lowercase) → array of minute timestamps
 const userMinuteActivity = new Map();
 
-// Track last awarded minute to prevent double awards
+// Track last awarded minute to add extra safety
 const userLastAwardMinute = new Map();
 
-// Track previous streak length for detecting losses (for logging)
+// Track previous streak for logging changes
 const userPreviousStreak = new Map();
 
-// Bots to ignore
-const IGNORED_BOTS = new Set(['botrix']);
+// Bots to ignore (case-insensitive)
+const IGNORED_BOTS = new Set(['botrix', 'kickbot']);
 
 async function award10Points(username) {
   const lowerUsername = username.toLowerCase();
@@ -36,7 +36,7 @@ async function award10Points(username) {
         points = points + 10
     `, [lowerUsername]);
 
-    console.log(`Message from: ${username} (Streak: 10 → +10 points awarded!)`);
+    console.log(`Message from: ${username} (Streak: 10 → +10 points awarded! → Streak reset for new cycle)`);
     await conn.end();
   } catch (err) {
     console.error('Database error during award:', err);
@@ -57,23 +57,23 @@ function processChatMessage(username) {
 
   let minutes = userMinuteActivity.get(username) || [];
 
-  // Determine if this is a new minute for this user
+  // Was this a new minute?
   const wasNewMinute = minutes.length === 0 || minutes[minutes.length - 1] !== currentMinute;
 
-  // Only add if it's a new minute
+  // Add current minute if new
   if (wasNewMinute) {
     minutes.push(currentMinute);
   }
 
-  // Clean old minutes (keep last 20 as buffer)
+  // Clean old minutes
   const cutoff = currentMinute - 20;
   minutes = minutes.filter(m => m > cutoff);
+
+  // Temporarily update map for streak calculation
   userMinuteActivity.set(username, minutes);
 
-  // Sort descending for streak checking
+  // Calculate current streak
   const sortedMinutes = [...minutes].sort((a, b) => b - a);
-
-  // Calculate current streak (consecutive minutes ending now)
   let currentStreak = 0;
   for (let i = 0; i < sortedMinutes.length; i++) {
     if (sortedMinutes[i] === currentMinute - i) {
@@ -83,38 +83,37 @@ function processChatMessage(username) {
     }
   }
 
-  // Get previous streak for this user (before this message)
   const previousStreak = userPreviousStreak.get(username) || 0;
 
-  // Log based on what happened
+  // Logging
   if (!wasNewMinute) {
-    // Same minute as last message → no streak change
     console.log(`Message from: ${originalUsername} (Streak: ${currentStreak})`);
   } else if (currentMinute - (sortedMinutes[1] || currentMinute) > 1) {
-    // There was a gap: previous minute not present → streak reset
+    // Gap detected → reset
     if (previousStreak > 0) {
       console.log(`Message from: ${originalUsername} (Lost streak of ${previousStreak} → now 1)`);
     } else {
       console.log(`Message from: ${originalUsername} (Streak: 1)`);
     }
   } else if (currentStreak > previousStreak) {
-    // Streak increased
     console.log(`Message from: ${originalUsername} (Streak: ${currentStreak})`);
   } else {
-    // Shouldn't happen often, but safe
     console.log(`Message from: ${originalUsername} (Streak: ${currentStreak})`);
   }
 
-  // Update previous streak for next comparison
+  // Update previous streak
   userPreviousStreak.set(username, currentStreak);
 
-  // Award points if streak hits 10+
+  // Check for reward
   if (currentStreak >= 10) {
     const lastAward = userLastAwardMinute.get(username) || 0;
     if (currentMinute > lastAward) {
       award10Points(originalUsername);
       userLastAwardMinute.set(username, currentMinute);
-      // Note: we override the normal streak log above with the award log in award10Points
+
+      // *** CRITICAL FIX: Clear streak history after reward ***
+      userMinuteActivity.delete(username); // Fully reset → next message = streak 1
+      userPreviousStreak.set(username, 0); // Ensure logging shows fresh start
     }
   }
 }
@@ -157,7 +156,7 @@ function connectWS() {
         }
       }
     } catch (e) {
-      // Ignore malformed
+      // Ignore malformed messages
     }
   });
 
